@@ -369,7 +369,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.options = options;
 
         // Apply always-center and such right away.
-        if !self.columns.is_empty() && !self.view_offset.is_gesture() {
+        if !self.columns.is_empty()
+            && !self.view_offset.is_gesture()
+            && self.wrap_period_adjust.is_none()
+        {
             self.animate_view_offset_to_column(None, self.active_column_idx, None);
         }
     }
@@ -756,6 +759,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         new_view_offset: f64,
         config: niri_config::Animation,
     ) {
+        // A wrap animation uses a shifted view offset; retargeting to the real
+        // column offset would scroll the long way back to the start.
+        if self.wrap_period_adjust.is_some() {
+            return;
+        }
         let new_col_x = self.column_x(idx);
         let old_col_x = self.column_x(self.active_column_idx);
         let offset_delta = old_col_x - new_col_x;
@@ -839,6 +847,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     fn activate_column_with_anim_config(&mut self, idx: usize, config: niri_config::Animation) {
+        if self.wrap_period_adjust.is_some() && self.active_column_idx == idx {
+            return;
+        }
         self.apply_pending_column_wrap_adjust();
 
         if self.active_column_idx == idx
@@ -1725,8 +1736,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     fn column_wrap_shifts(&self) -> impl Iterator<Item = f64> {
-        let wrap = self.wrap_period_adjust.is_some() || self.options.layout.wrap_columns;
-        let period = if wrap && self.columns.len() > 1 {
+        // Only draw wrap copies while a wrap animation is in progress. Drawing them all
+        // the time makes the far column appear duplicated after a normal view reset.
+        let period = if self.wrap_period_adjust.is_some() && self.columns.len() > 1 {
             self.column_period()
         } else {
             0.
@@ -2538,7 +2550,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let render_off = self.columns[idx].render_offset();
             for &shift in &shifts {
                 let x = xs[idx] + shift;
-                if shift != 0. {
+                // During wrap, skip the real (off-screen) placement so hit-testing and
+                // cursor warp use the visible copy.
+                if shift != 0. || self.wrap_period_adjust.is_some() {
                     let screen_x = x - view_pos;
                     if screen_x >= view_w || screen_x + width <= 0. {
                         continue;
