@@ -1622,7 +1622,10 @@ impl<W: LayoutElement> Monitor<W> {
 
     pub fn workspaces_render_geo(&self) -> impl Iterator<Item = Rectangle<f64, Logical>> {
         // Return position for one-past-last workspace too.
-        (0..=self.workspaces.len() as i32).map(|idx| self.workspace_render_geo_at(idx))
+        let geos: Vec<_> = (0..=self.workspaces.len() as i32)
+            .map(|idx| self.workspace_render_geo_at(idx))
+            .collect();
+        geos.into_iter()
     }
 
     fn wrap_visual_index_range(&self) -> (i32, i32) {
