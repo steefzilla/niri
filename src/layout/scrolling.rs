@@ -3229,6 +3229,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return;
         }
 
+        self.apply_pending_column_wrap_adjust();
+
         let gesture = ViewGesture {
             current_view_offset: self.view_offset.current(),
             animation: None,
@@ -3251,6 +3253,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             // Already active.
             return;
         }
+
+        self.apply_pending_column_wrap_adjust();
 
         let gesture = ViewGesture {
             current_view_offset: self.view_offset.current(),
@@ -3358,6 +3362,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             leftmost -= active_col_x;
             rightmost -= active_col_x;
 
+            if self.options.layout.wrap_columns && self.columns.len() > 1 {
+                let period = last_col_x + last_col_width + gaps;
+                leftmost -= period;
+                rightmost += period;
+            }
+
             (leftmost, rightmost)
         };
         let min_offset = f64::min(leftmost, rightmost);
@@ -3412,9 +3422,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             view_pos: f64,
             // Column to activate for this snapping point.
             col_idx: usize,
+            // Non-zero when this snap is a wrap copy at ±column_period().
+            shift: f64,
         }
 
         let mut snapping_points = Vec::new();
+        let wrap = self.options.layout.wrap_columns && self.columns.len() > 1;
+        let period = if wrap { self.column_period() } else { 0. };
 
         if self.is_centering_focused_column() {
             let mut col_x = 0.;
@@ -3437,7 +3451,23 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 } else {
                     col_x - (area.size.w - col_w) / 2. - left_strut
                 };
-                snapping_points.push(Snap { view_pos, col_idx });
+                snapping_points.push(Snap {
+                    view_pos,
+                    col_idx,
+                    shift: 0.,
+                });
+                if wrap {
+                    snapping_points.push(Snap {
+                        view_pos: view_pos + period,
+                        col_idx,
+                        shift: period,
+                    });
+                    snapping_points.push(Snap {
+                        view_pos: view_pos - period,
+                        col_idx,
+                        shift: -period,
+                    });
+                }
 
                 col_x += col_w + self.options.layout.gaps;
             }
@@ -3549,17 +3579,20 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             snapping_points.push(Snap {
                 view_pos: leftmost_snap,
                 col_idx: 0,
+                shift: 0.,
             });
             snapping_points.push(Snap {
                 view_pos: rightmost_snap,
                 col_idx: last_col_idx,
+                shift: 0.,
             });
 
-            let mut push = |col_idx, left, right| {
+            let mut push = |col_idx, left, right, shift| {
                 if leftmost_snap < left && left < rightmost_snap {
                     snapping_points.push(Snap {
                         view_pos: left,
                         col_idx,
+                        shift,
                     });
                 }
 
@@ -3568,6 +3601,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     snapping_points.push(Snap {
                         view_pos: right,
                         col_idx,
+                        shift,
                     });
                 }
             };
@@ -3582,9 +3616,52 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
                     self.columns.get(col_idx + 1).map(|c| c.width()),
                 );
-                push(col_idx, left, right);
+                push(col_idx, left, right, 0.);
 
                 col_x += col.width() + gaps;
+            }
+
+            // Allow snapping onto wrap copies past the first/last column, so overview
+            // panning can settle on views like CA rather than bouncing back to AB.
+            if wrap {
+                let n = self.columns.len();
+                let prev_w = |idx: usize| {
+                    if idx > 0 {
+                        Some(self.columns[idx - 1].width())
+                    } else {
+                        Some(self.columns[n - 1].width())
+                    }
+                };
+                let next_w = |idx: usize| {
+                    if idx + 1 < n {
+                        Some(self.columns[idx + 1].width())
+                    } else {
+                        Some(self.columns[0].width())
+                    }
+                };
+
+                for shift in [-period, period] {
+                    let mut col_x = shift;
+                    for (col_idx, col) in self.columns.iter().enumerate() {
+                        let (left, right) =
+                            snap_points(col_x, col, prev_w(col_idx), next_w(col_idx));
+                        for view_pos in [left, right - view_width] {
+                            let outside = if shift > 0. {
+                                view_pos > rightmost_snap
+                            } else {
+                                view_pos < leftmost_snap
+                            };
+                            if outside {
+                                snapping_points.push(Snap {
+                                    view_pos,
+                                    col_idx,
+                                    shift,
+                                });
+                            }
+                        }
+                        col_x += col.width() + gaps;
+                    }
+                }
             }
         }
 
@@ -3600,7 +3677,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         let mut new_col_idx = target_snap.col_idx;
 
-        if !self.is_centering_focused_column() {
+        if !self.is_centering_focused_column() && target_snap.shift == 0. {
             // Focus the furthest window towards the direction of the gesture.
             if target_view_offset >= current_view_offset {
                 for col_idx in (new_col_idx + 1)..self.columns.len() {
@@ -3680,6 +3757,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
 
         self.active_column_idx = new_col_idx;
+
+        if target_snap.shift != 0. {
+            self.wrap_period_adjust = Some(target_snap.shift);
+        }
 
         let target_view_offset = target_snap.view_pos - new_col_x;
 
