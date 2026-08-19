@@ -1485,6 +1485,7 @@ mod tests {
                 always_center_single_column: false,
                 empty_workspace_above_first: false,
                 wrap_columns: false,
+                wrap_workspaces: Off,
                 default_column_display: Tabbed,
                 gaps: 8.0,
                 struts: Struts {

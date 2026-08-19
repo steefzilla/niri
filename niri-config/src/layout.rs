@@ -21,6 +21,7 @@ pub struct Layout {
     pub always_center_single_column: bool,
     pub empty_workspace_above_first: bool,
     pub wrap_columns: bool,
+    pub wrap_workspaces: WrapWorkspaces,
     pub default_column_display: ColumnDisplay,
     pub gaps: f64,
     pub struts: Struts,
@@ -45,6 +46,7 @@ impl Default for Layout {
             always_center_single_column: false,
             empty_workspace_above_first: false,
             wrap_columns: false,
+            wrap_workspaces: WrapWorkspaces::Off,
             default_column_display: ColumnDisplay::Normal,
             gaps: 16.,
             struts: Struts::default(),
@@ -78,6 +80,7 @@ impl MergeWith<LayoutPart> for Layout {
             preset_column_widths,
             preset_window_heights,
             center_focused_column,
+            wrap_workspaces,
             default_column_display,
             struts,
             background_color,
@@ -123,6 +126,8 @@ pub struct LayoutPart {
     pub empty_workspace_above_first: Option<Flag>,
     #[knuffel(child)]
     pub wrap_columns: Option<Flag>,
+    #[knuffel(child, unwrap(argument))]
+    pub wrap_workspaces: Option<WrapWorkspaces>,
     #[knuffel(child, unwrap(argument, str))]
     pub default_column_display: Option<ColumnDisplay>,
     #[knuffel(child, unwrap(argument))]
@@ -161,6 +166,19 @@ pub struct Struts {
     pub top: FloatOrInt<-65535, 65535>,
     #[knuffel(child, unwrap(argument), default)]
     pub bottom: FloatOrInt<-65535, 65535>,
+}
+
+#[derive(knuffel::DecodeScalar, Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub enum WrapWorkspaces {
+    /// Do not wrap; stop at the first and last workspace.
+    #[default]
+    Off,
+    /// Wrap, skipping empty workspaces at the start of the strip.
+    ///
+    /// The empty workspace niri keeps at the bottom is included.
+    Occupied,
+    /// Wrap across every workspace, including empty ones.
+    All,
 }
 
 #[derive(knuffel::DecodeScalar, Debug, Default, PartialEq, Eq, Clone, Copy)]
