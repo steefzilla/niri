@@ -144,16 +144,24 @@ impl Data {
         let max_off_screen_ver = f64::max(0., self.size.h - min_on_screen_ver);
 
         logical_pos -= self.working_area.loc;
-        logical_pos.x = f64::max(logical_pos.x, -max_off_screen_hor);
-        logical_pos.y = f64::max(logical_pos.y, -max_off_screen_ver);
-        logical_pos.x = f64::min(
-            logical_pos.x,
-            self.working_area.size.w - self.size.w + max_off_screen_hor,
-        );
-        logical_pos.y = f64::min(
-            logical_pos.y,
-            self.working_area.size.h - self.size.h + max_off_screen_ver,
-        );
+        // Skip the on-screen clamp when the requested position is far outside the
+        // working area, so windows can be placed fully off-screen.
+        let allow_off_x = logical_pos.x < -1000. || logical_pos.x > self.working_area.size.w + 1000.;
+        let allow_off_y = logical_pos.y < -1000. || logical_pos.y > self.working_area.size.h + 1000.;
+        if !allow_off_x {
+            logical_pos.x = f64::max(logical_pos.x, -max_off_screen_hor);
+            logical_pos.x = f64::min(
+                logical_pos.x,
+                self.working_area.size.w - self.size.w + max_off_screen_hor,
+            );
+        }
+        if !allow_off_y {
+            logical_pos.y = f64::max(logical_pos.y, -max_off_screen_ver);
+            logical_pos.y = f64::min(
+                logical_pos.y,
+                self.working_area.size.h - self.size.h + max_off_screen_ver,
+            );
+        }
         logical_pos += self.working_area.loc;
 
         self.logical_pos = logical_pos;
