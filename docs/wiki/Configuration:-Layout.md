@@ -10,6 +10,7 @@ layout {
     center-focused-column "never"
     always-center-single-column
     empty-workspace-above-first
+    wrap-columns
     default-column-display "tabbed"
     background-color "#003300"
 
@@ -139,6 +140,19 @@ If set, niri will always center a single column on a workspace, regardless of th
 ```kdl
 layout {
     always-center-single-column
+}
+```
+
+### `wrap-columns`
+
+<sup>Since: next release</sup>
+
+If set, `focus-column-left` and `focus-column-right` wrap at the ends of the scrolling layout.
+Scrolling past the last column focuses the first, and scrolling past the first focuses the last.
+
+```kdl
+layout {
+    wrap-columns
 }
 ```
 
