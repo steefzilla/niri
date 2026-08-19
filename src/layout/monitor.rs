@@ -3,7 +3,7 @@ use std::iter::zip;
 use std::rc::Rc;
 use std::time::Duration;
 
-use niri_config::{CornerRadius, LayoutPart};
+use niri_config::{CornerRadius, LayoutPart, WrapWorkspaces};
 use smithay::backend::renderer::element::utils::{
     CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
 };
@@ -448,6 +448,19 @@ impl<W: LayoutElement> Monitor<W> {
         idx: usize,
         config: Option<niri_config::Animation>,
     ) {
+        self.activate_workspace_inner(idx, config, None);
+    }
+
+    fn activate_workspace_with_visual(&mut self, idx: usize, visual_to: f64) {
+        self.activate_workspace_inner(idx, None, Some(visual_to));
+    }
+
+    fn activate_workspace_inner(
+        &mut self,
+        idx: usize,
+        config: Option<niri_config::Animation>,
+        visual_to: Option<f64>,
+    ) {
         // FIXME: also compute and use current velocity.
         let current_idx = self.workspace_render_idx();
 
@@ -459,6 +472,7 @@ impl<W: LayoutElement> Monitor<W> {
         self.active_workspace_idx = idx;
 
         let config = config.unwrap_or(self.options.animations.workspace_switch.0);
+        let anim_to = visual_to.unwrap_or(idx as f64);
 
         match &mut self.workspace_switch {
             // During a DnD scroll, we want to visually animate even if idx matches the active idx.
@@ -483,11 +497,71 @@ impl<W: LayoutElement> Monitor<W> {
                 self.workspace_switch = Some(WorkspaceSwitch::Animation(Animation::new(
                     self.clock.clone(),
                     current_idx,
-                    idx as f64,
+                    anim_to,
                     0.,
                     config,
                 )));
             }
+        }
+    }
+
+    /// Visual animation target for a directional workspace move.
+    ///
+    /// Wrapping up animates to -1 so the target workspace comes from above. Wrapping down
+    /// animates to `n` so it comes from below. Occupied wrap still uses a one-workspace
+    /// visual step; the workspace shown at -1/`n` is the wrap target, not necessarily
+    /// adjacent in the real strip.
+    fn visual_target_for_dir(&self, new_idx: usize, up: bool) -> f64 {
+        let n = self.workspaces.len();
+        let current = self.workspace_render_idx();
+        let wrapping_up = up && new_idx > self.active_workspace_idx;
+        let wrapping_down = !up && new_idx < self.active_workspace_idx;
+
+        if wrapping_up {
+            if current < 0.0 {
+                -1.0 - (self.wrap_end_idx() as f64 - new_idx as f64)
+            } else {
+                -1.0
+            }
+        } else if wrapping_down {
+            if current > (n - 1) as f64 {
+                n as f64 + (new_idx as f64 - self.wrap_start_idx() as f64)
+            } else {
+                n as f64
+            }
+        } else if current < 0.0 {
+            -1.0 - (self.wrap_end_idx() as f64 - new_idx as f64)
+        } else if current > (n - 1) as f64 {
+            n as f64 + (new_idx as f64 - self.wrap_start_idx() as f64)
+        } else {
+            new_idx as f64
+        }
+    }
+
+    fn wrap_end_idx(&self) -> usize {
+        match self.options.layout.wrap_workspaces {
+            WrapWorkspaces::Occupied => self
+                .workspaces
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, ws)| ws.has_windows())
+                .map(|(i, _)| i)
+                .unwrap_or(0),
+            WrapWorkspaces::All | WrapWorkspaces::Off => self.workspaces.len().saturating_sub(1),
+        }
+    }
+
+    fn wrap_start_idx(&self) -> usize {
+        match self.options.layout.wrap_workspaces {
+            WrapWorkspaces::Occupied => self
+                .workspaces
+                .iter()
+                .enumerate()
+                .find(|(_, ws)| ws.has_windows())
+                .map(|(i, _)| i)
+                .unwrap_or(0),
+            WrapWorkspaces::All | WrapWorkspaces::Off => 0,
         }
     }
 
@@ -972,31 +1046,81 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     pub fn switch_workspace_up(&mut self) {
-        let new_idx = match &self.workspace_switch {
+        let n = self.workspaces.len();
+        match &self.workspace_switch {
             // During a DnD scroll, select the prev apparent workspace.
             Some(WorkspaceSwitch::Gesture(gesture)) if gesture.dnd_last_event_time.is_some() => {
                 let current = gesture.current_idx;
                 let new = current.ceil() - 1.;
-                new.clamp(0., (self.workspaces.len() - 1) as f64) as usize
+                let new_idx = new.clamp(0., (n.saturating_sub(1)) as f64) as usize;
+                self.activate_workspace(new_idx);
             }
-            _ => self.active_workspace_idx.saturating_sub(1),
-        };
+            _ => {
+                if n <= 1 {
+                    return;
+                }
 
-        self.activate_workspace(new_idx);
+                let wrap = self.options.layout.wrap_workspaces;
+                if wrap == WrapWorkspaces::Off {
+                    if self.active_workspace_idx == 0 {
+                        return;
+                    }
+                    self.activate_workspace(self.active_workspace_idx - 1);
+                    return;
+                }
+
+                let new_idx = if self.active_workspace_idx == 0 {
+                    self.wrap_end_idx()
+                } else {
+                    self.active_workspace_idx - 1
+                };
+                if new_idx == self.active_workspace_idx {
+                    return;
+                }
+
+                let visual_to = self.visual_target_for_dir(new_idx, true);
+                self.activate_workspace_with_visual(new_idx, visual_to);
+            }
+        }
     }
 
     pub fn switch_workspace_down(&mut self) {
-        let new_idx = match &self.workspace_switch {
+        let n = self.workspaces.len();
+        match &self.workspace_switch {
             // During a DnD scroll, select the next apparent workspace.
             Some(WorkspaceSwitch::Gesture(gesture)) if gesture.dnd_last_event_time.is_some() => {
                 let current = gesture.current_idx;
                 let new = current.floor() + 1.;
-                new.clamp(0., (self.workspaces.len() - 1) as f64) as usize
+                let new_idx = new.clamp(0., (n.saturating_sub(1)) as f64) as usize;
+                self.activate_workspace(new_idx);
             }
-            _ => min(self.active_workspace_idx + 1, self.workspaces.len() - 1),
-        };
+            _ => {
+                if n <= 1 {
+                    return;
+                }
 
-        self.activate_workspace(new_idx);
+                let wrap = self.options.layout.wrap_workspaces;
+                if wrap == WrapWorkspaces::Off {
+                    if self.active_workspace_idx + 1 >= n {
+                        return;
+                    }
+                    self.activate_workspace(self.active_workspace_idx + 1);
+                    return;
+                }
+
+                let new_idx = if self.active_workspace_idx + 1 >= n {
+                    self.wrap_start_idx()
+                } else {
+                    self.active_workspace_idx + 1
+                };
+                if new_idx == self.active_workspace_idx {
+                    return;
+                }
+
+                let visual_to = self.visual_target_for_dir(new_idx, false);
+                self.activate_workspace_with_visual(new_idx, visual_to);
+            }
+        }
     }
 
     fn previous_workspace_idx(&self) -> Option<usize> {
@@ -1102,6 +1226,11 @@ impl<W: LayoutElement> Monitor<W> {
             if Some(ws.id()) == insert_hint_ws_id {
                 insert_hint_ws_geo = Some(geo);
             }
+        }
+
+        // Wrap-around copies can show a workspace whose primary position is off-screen.
+        for idx in self.wrap_render_workspace_indices() {
+            self.workspaces[idx].update_render_elements(is_active, RenderLayer::Normal);
         }
 
         self.insert_hint_render_loc = None;
@@ -1472,7 +1601,7 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
-    pub fn workspaces_render_geo(&self) -> impl Iterator<Item = Rectangle<f64, Logical>> {
+    pub fn workspace_render_geo_at(&self, visual_idx: i32) -> Rectangle<f64, Logical> {
         let scale = self.scale.fractional_scale();
         let zoom = self.overview_zoom();
 
@@ -1488,19 +1617,86 @@ impl<W: LayoutElement> Monitor<W> {
         let first_ws_y = -self.workspace_render_idx() * ws_height_with_gap;
         let first_ws_y = round_logical_in_physical(scale, first_ws_y);
 
+        let y = first_ws_y + visual_idx as f64 * ws_height_with_gap;
+        let loc = Point::from((0., y)) + static_offset;
+
+        // Even though all components that go into loc are rounded to physical pixels, the
+        // floating point addition may lose precision. This can result for example in the
+        // current workspace having y = 0.0000000000002 and thus missing pointer hits at the
+        // monitor edge with y = 0. So, post-round the location too.
+        let loc = loc.to_physical_precise_round(scale).to_logical(scale);
+
+        Rectangle::new(loc, ws_size)
+    }
+
+    pub fn workspaces_render_geo(&self) -> impl Iterator<Item = Rectangle<f64, Logical>> {
         // Return position for one-past-last workspace too.
-        (0..=self.workspaces.len()).map(move |idx| {
-            let y = first_ws_y + idx as f64 * ws_height_with_gap;
-            let loc = Point::from((0., y)) + static_offset;
+        (0..=self.workspaces.len() as i32).map(|idx| self.workspace_render_geo_at(idx))
+    }
 
-            // Even though all components that go into loc are rounded to physical pixels, the
-            // floating point addition may lose precision. This can result for example in the
-            // current workspace having y = 0.0000000000002 and thus missing pointer hits at the
-            // monitor edge with y = 0. So, post-round the location too.
-            let loc = loc.to_physical_precise_round(scale).to_logical(scale);
+    fn wrap_visual_index_range(&self) -> (i32, i32) {
+        let current = self.workspace_render_idx();
+        let target = self
+            .workspace_switch
+            .as_ref()
+            .map(|s| s.target_idx())
+            .unwrap_or(current);
+        let min_vis = current.min(target).floor() as i32 - 1;
+        let max_vis = current.max(target).ceil() as i32 + 1;
+        (min_vis, max_vis)
+    }
 
-            Rectangle::new(loc, ws_size)
-        })
+    fn wrap_copy_workspace_idx(&self, vis: i32) -> usize {
+        let n = self.workspaces.len() as i32;
+        if vis < 0 {
+            let end = self.wrap_end_idx() as i32;
+            (end + vis + 1).clamp(0, n - 1) as usize
+        } else {
+            let start = self.wrap_start_idx() as i32;
+            (start + vis - n).clamp(0, n - 1) as usize
+        }
+    }
+
+    fn wrap_render_copies(&self) -> Vec<(usize, Rectangle<f64, Logical>)> {
+        if self.options.layout.wrap_workspaces == WrapWorkspaces::Off {
+            return Vec::new();
+        }
+
+        let n = self.workspaces.len();
+        if n <= 1 {
+            return Vec::new();
+        }
+
+        let n_i = n as i32;
+        let output_geo = Rectangle::from_size(self.view_size);
+        let (min_vis, max_vis) = self.wrap_visual_index_range();
+        let mut out = Vec::new();
+
+        for vis in min_vis..=max_vis {
+            if (0..n_i).contains(&vis) {
+                continue;
+            }
+
+            let geo = self.workspace_render_geo_at(vis);
+            if geo.intersection(output_geo).is_none() {
+                continue;
+            }
+
+            out.push((self.wrap_copy_workspace_idx(vis), geo));
+        }
+
+        out
+    }
+
+    fn wrap_render_workspace_indices(&self) -> Vec<usize> {
+        let mut idxs: Vec<usize> = self
+            .wrap_render_copies()
+            .into_iter()
+            .map(|(idx, _)| idx)
+            .collect();
+        idxs.sort_unstable();
+        idxs.dedup();
+        idxs
     }
 
     pub fn workspaces_with_render_geo_cull(
@@ -1508,11 +1704,20 @@ impl<W: LayoutElement> Monitor<W> {
         cull: bool,
     ) -> impl Iterator<Item = (&Workspace<W>, Rectangle<f64, Logical>)> {
         let output_geo = Rectangle::from_size(self.view_size);
+        let n = self.workspaces.len();
+        let mut items: Vec<(usize, Rectangle<f64, Logical>)> = Vec::with_capacity(n + 2);
 
-        let geo = self.workspaces_render_geo();
-        zip(self.workspaces.iter(), geo)
-            // Cull out workspaces outside the output.
-            .filter(move |(_ws, geo)| !cull || geo.intersection(output_geo).is_some())
+        for (idx, geo) in zip(0..n, self.workspaces_render_geo()) {
+            if !cull || geo.intersection(output_geo).is_some() {
+                items.push((idx, geo));
+            }
+        }
+
+        items.extend(self.wrap_render_copies());
+
+        items
+            .into_iter()
+            .map(|(idx, geo)| (&self.workspaces[idx], geo))
     }
 
     pub fn workspaces_with_render_geo(
@@ -1525,11 +1730,20 @@ impl<W: LayoutElement> Monitor<W> {
         &self,
     ) -> impl Iterator<Item = ((usize, &Workspace<W>), Rectangle<f64, Logical>)> {
         let output_geo = Rectangle::from_size(self.view_size);
+        let n = self.workspaces.len();
+        let mut items: Vec<(usize, Rectangle<f64, Logical>)> = Vec::with_capacity(n + 2);
 
-        let geo = self.workspaces_render_geo();
-        zip(self.workspaces.iter().enumerate(), geo)
-            // Cull out workspaces outside the output.
-            .filter(move |(_ws, geo)| geo.intersection(output_geo).is_some())
+        for (idx, geo) in zip(0..n, self.workspaces_render_geo()) {
+            if geo.intersection(output_geo).is_some() {
+                items.push((idx, geo));
+            }
+        }
+
+        items.extend(self.wrap_render_copies());
+
+        items
+            .into_iter()
+            .map(|(idx, geo)| ((idx, &self.workspaces[idx]), geo))
     }
 
     pub fn workspaces_with_render_geo_mut(
@@ -2133,11 +2347,13 @@ impl<W: LayoutElement> Monitor<W> {
         assert!(self.active_workspace_idx < self.workspaces.len());
 
         if let Some(WorkspaceSwitch::Animation(anim)) = &self.workspace_switch {
-            let before_idx = anim.from() as usize;
-            let after_idx = anim.to() as usize;
-
-            assert!(before_idx < self.workspaces.len());
-            assert!(after_idx < self.workspaces.len());
+            let n = self.workspaces.len() as f64;
+            // Wrap-around animations use visual indices outside [0, n), e.g. -1 or n.
+            let to = anim.to();
+            if (0.0..n).contains(&to) {
+                assert_eq!(to.round() as usize, self.active_workspace_idx);
+            }
+            assert!(self.active_workspace_idx < self.workspaces.len());
         }
 
         assert!(
