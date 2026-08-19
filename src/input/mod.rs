@@ -3023,6 +3023,7 @@ impl State {
                 }
 
                 if !is_overview_open {
+                    self.niri.suppress_layout_keyboard_focus = false;
                     self.niri.layout.activate_window(&window);
                 }
 
@@ -3041,6 +3042,7 @@ impl State {
                 self.niri.queue_redraw_all();
             } else if let Some(output) = self.niri.output_under_cursor() {
                 self.niri.layout.focus_output(&output);
+                self.niri.suppress_layout_keyboard_focus = true;
 
                 // FIXME: granular.
                 self.niri.queue_redraw_all();
