@@ -1579,15 +1579,32 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     pub fn focus_left(&mut self) -> bool {
-        if self.active_column_idx == 0 {
+        if self.columns.is_empty() {
             return false;
         }
+
+        if self.active_column_idx == 0 {
+            if self.options.layout.wrap_columns && self.columns.len() > 1 {
+                self.activate_column(self.columns.len() - 1);
+                return true;
+            }
+            return false;
+        }
+
         self.activate_column(self.active_column_idx - 1);
         true
     }
 
     pub fn focus_right(&mut self) -> bool {
+        if self.columns.is_empty() {
+            return false;
+        }
+
         if self.active_column_idx + 1 >= self.columns.len() {
+            if self.options.layout.wrap_columns && self.columns.len() > 1 {
+                self.activate_column(0);
+                return true;
+            }
             return false;
         }
 
