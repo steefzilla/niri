@@ -10,6 +10,7 @@ layout {
     center-focused-column "never"
     always-center-single-column
     empty-workspace-above-first
+    wrap-workspaces "off"
     default-column-display "tabbed"
     background-color "#003300"
 
@@ -151,6 +152,22 @@ If set, niri will always add an empty workspace at the very start, in addition t
 ```kdl
 layout {
     empty-workspace-above-first
+}
+```
+
+### `wrap-workspaces`
+
+<sup>Since: next release</sup>
+
+Controls whether `focus-workspace-up` and `focus-workspace-down` wrap at the ends of the workspace strip.
+
+- `"off"`: stop at the first and last workspace (default).
+- `"occupied"`: wrap to the last workspace that has windows, skipping the empty workspace niri keeps at the bottom. The animation continues in the scroll direction, as if that workspace sat just past the end of the strip.
+- `"all"`: wrap across every workspace, including the empty one at the end.
+
+```kdl
+layout {
+    wrap-workspaces "occupied"
 }
 ```
 
