@@ -162,8 +162,8 @@ layout {
 Controls whether `focus-workspace-up` and `focus-workspace-down` wrap at the ends of the workspace strip.
 
 - `"off"`: stop at the first and last workspace (default).
-- `"occupied"`: wrap to the last workspace that has windows, skipping the empty workspace niri keeps at the bottom. The animation continues in the scroll direction, as if that workspace sat just past the end of the strip.
-- `"all"`: wrap across every workspace, including the empty one at the end.
+- `"occupied"`: wrap across workspaces that have windows, including the empty workspace niri keeps at the bottom. Wrapping from that empty workspace goes to the first workspace that has windows (skipping `empty-workspace-above-first` if it is set). The animation continues in the scroll direction, as if that workspace sat just past the end of the strip.
+- `"all"`: wrap across every workspace, including empty ones.
 
 ```kdl
 layout {

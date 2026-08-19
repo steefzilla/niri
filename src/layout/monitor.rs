@@ -539,17 +539,8 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     fn wrap_end_idx(&self) -> usize {
-        match self.options.layout.wrap_workspaces {
-            WrapWorkspaces::Occupied => self
-                .workspaces
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(_, ws)| ws.has_windows())
-                .map(|(i, _)| i)
-                .unwrap_or(0),
-            WrapWorkspaces::All | WrapWorkspaces::Off => self.workspaces.len().saturating_sub(1),
-        }
+        // Always include the trailing empty workspace so wrapping down can land on it.
+        self.workspaces.len().saturating_sub(1)
     }
 
     fn wrap_start_idx(&self) -> usize {

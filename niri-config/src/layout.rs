@@ -168,9 +168,11 @@ pub enum WrapWorkspaces {
     /// Do not wrap; stop at the first and last workspace.
     #[default]
     Off,
-    /// Wrap to the last workspace that has windows, skipping the trailing empty workspace.
+    /// Wrap, skipping empty workspaces at the start of the strip.
+    ///
+    /// The empty workspace niri keeps at the bottom is included.
     Occupied,
-    /// Wrap across every workspace, including the empty one at the end.
+    /// Wrap across every workspace, including empty ones.
     All,
 }
 

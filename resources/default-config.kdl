@@ -123,8 +123,8 @@ layout {
 
     // Wrap focus-workspace-up/down at the ends of the strip.
     // - "off": stop at the first/last workspace (default)
-    // - "occupied": wrap to the last workspace that has windows
-    // - "all": wrap including the empty workspace at the bottom
+    // - "occupied": wrap including the empty workspace at the bottom
+    // - "all": wrap across every workspace
     // wrap-workspaces "off"
 
     // You can customize the widths that "switch-preset-column-width" (Mod+R) toggles between.
