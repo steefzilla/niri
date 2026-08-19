@@ -1687,22 +1687,39 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
 
         let config = self.options.animations.horizontal_view_movement.0;
-        let prev = self.active_column_idx;
         let old_view = self.view_pos();
         let period = self.column_period();
-        let off_new = self.compute_new_view_offset_for_column(None, idx, Some(prev));
+        let col_x = self.column_x(idx);
+        let visual_x = if wrapping_right {
+            col_x + period
+        } else {
+            col_x - period
+        };
+        let col = &self.columns[idx];
+        let off_visual = if self.is_centering_focused_column() {
+            self.compute_new_view_offset_centered(
+                Some(old_view),
+                visual_x,
+                col.width(),
+                col.sizing_mode(),
+            )
+        } else {
+            self.compute_new_view_offset_fit(
+                Some(old_view),
+                visual_x,
+                col.width(),
+                col.sizing_mode(),
+            )
+        };
 
         self.active_column_idx = idx;
         self.activate_prev_column_on_removal = None;
         self.view_offset_to_restore = None;
         self.interactive_resize = None;
 
-        let from = old_view - self.column_x(idx);
-        let (to, adjust) = if wrapping_right {
-            (off_new + period, period)
-        } else {
-            (off_new - period, -period)
-        };
+        let from = old_view - col_x;
+        let to = visual_x + off_visual - col_x;
+        let adjust = if wrapping_right { period } else { -period };
         self.wrap_period_adjust = Some(adjust);
         self.view_offset = ViewOffset::Animation(Animation::new(
             self.clock.clone(),
@@ -1736,9 +1753,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     fn column_wrap_shifts(&self) -> impl Iterator<Item = f64> {
-        // Only draw wrap copies while a wrap animation is in progress. Drawing them all
-        // the time makes the far column appear duplicated after a normal view reset.
-        let period = if self.wrap_period_adjust.is_some() && self.columns.len() > 1 {
+        let wrap = self.wrap_period_adjust.is_some() || self.options.layout.wrap_columns;
+        let period = if wrap && self.columns.len() > 1 {
             self.column_period()
         } else {
             0.
