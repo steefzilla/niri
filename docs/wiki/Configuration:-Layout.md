@@ -149,6 +149,7 @@ layout {
 
 If set, `focus-column-left` and `focus-column-right` wrap at the ends of the scrolling layout.
 Scrolling past the last column focuses the first, and scrolling past the first focuses the last.
+The view keeps moving in the same direction, as if that column sat just past the end of the strip.
 
 ```kdl
 layout {

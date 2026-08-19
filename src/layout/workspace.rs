@@ -940,14 +940,28 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn focus_column_right_or_first(&mut self) {
-        if !self.focus_right() {
-            self.focus_column_first();
+        if self.floating_is_active.get() {
+            if !self.floating.focus_right() {
+                self.floating.focus_leftmost();
+            }
+            return;
+        }
+
+        if !self.scrolling.focus_right() {
+            self.scrolling.wrap_activate_first();
         }
     }
 
     pub fn focus_column_left_or_last(&mut self) {
-        if !self.focus_left() {
-            self.focus_column_last();
+        if self.floating_is_active.get() {
+            if !self.floating.focus_left() {
+                self.floating.focus_rightmost();
+            }
+            return;
+        }
+
+        if !self.scrolling.focus_left() {
+            self.scrolling.wrap_activate_last();
         }
     }
 
