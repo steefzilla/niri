@@ -2509,7 +2509,7 @@ impl Niri {
 
         event_loop
             .insert_source(
-                Timer::from_duration(Duration::from_secs(60)),
+                Timer::from_duration(Duration::from_secs(15)),
                 |_, _, state| {
                     let _span = tracy_client::span!("startup timeout");
                     state.niri.is_at_startup = false;
@@ -4418,7 +4418,13 @@ impl Niri {
 
             // We don't expect more than one workspace when render_above_top_layer().
             if let Some((ws, _geo)) = mon.workspaces_with_render_geo().next() {
-                push(ws.render_background().into());
+                if mon.overview_zoom() < 1. {
+                    if let Some(bg) = ws.render_overview_empty_background() {
+                        push(bg.into());
+                    }
+                } else {
+                    push(ws.render_background().into());
+                }
             }
         } else {
             push_popups_from_layer!(Layer::Top);
@@ -4463,7 +4469,13 @@ impl Niri {
                 push_normal_from_layer!(Layer::Bottom, ns, xray_pos, process!(geo));
                 push_normal_from_layer!(Layer::Background, ns, xray_pos, process!(geo));
 
-                process!(geo)(ws.render_background());
+                if mon.overview_zoom() < 1. {
+                    if let Some(bg) = ws.render_overview_empty_background() {
+                        process!(geo)(bg);
+                    }
+                } else {
+                    process!(geo)(ws.render_background());
+                }
             }
         }
 

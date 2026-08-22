@@ -1484,6 +1484,8 @@ mod tests {
                 center_focused_column: OnOverflow,
                 always_center_single_column: false,
                 empty_workspace_above_first: false,
+                wrap_columns: false,
+                wrap_workspaces: Off,
                 default_column_display: Tabbed,
                 gaps: 8.0,
                 struts: Struts {
@@ -1705,6 +1707,8 @@ mod tests {
                     b: 0.15,
                     a: 1.0,
                 },
+                empty_workspace_background: Overview::default().empty_workspace_background,
+                column_gap: 0.005,
                 workspace_shadow: WorkspaceShadow {
                     off: false,
                     offset: ShadowOffset {

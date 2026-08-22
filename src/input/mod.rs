@@ -3330,10 +3330,21 @@ impl State {
             let modifiers = modifiers_from_state(mods);
 
             let horizontal = horizontal_amount.unwrap_or(0.);
-            let vertical = vertical_amount.unwrap_or(0.);
+            let mut vertical = vertical_amount.unwrap_or(0.);
 
             if should_handle_in_overview && modifiers.is_empty() {
                 let mut redraw = false;
+
+                let vertical_factor = self
+                    .niri
+                    .config
+                    .borrow()
+                    .input
+                    .touchpad
+                    .scroll_factor
+                    .map(|x| x.h_v_factors().1)
+                    .unwrap_or(1.0);
+                vertical *= vertical_factor;
 
                 let action = self
                     .niri

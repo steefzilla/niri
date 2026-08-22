@@ -248,6 +248,17 @@ overview {
 }
 ```
 
+#### `column-gap`
+
+Horizontal gap between columns in the overview, as a fraction of the monitor width.
+For example, `0.005` is 0.5% of the width between each pair of columns.
+
+```kdl
+overview {
+    column-gap 0.005
+}
+```
+
 ### `xwayland-satellite`
 
 <sup>Since: 25.08</sup>

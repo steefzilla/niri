@@ -1,4 +1,4 @@
-use crate::appearance::{Color, WorkspaceShadow, WorkspaceShadowPart, DEFAULT_BACKDROP_COLOR};
+use crate::appearance::{Color, WorkspaceShadow, WorkspaceShadowPart, DEFAULT_BACKDROP_COLOR, DEFAULT_EMPTY_WORKSPACE_BACKGROUND};
 use crate::utils::{Flag, MergeWith};
 use crate::FloatOrInt;
 
@@ -122,6 +122,9 @@ impl MergeWith<ClipboardPart> for Clipboard {
 pub struct Overview {
     pub zoom: f64,
     pub backdrop_color: Color,
+    pub empty_workspace_background: Color,
+    /// Horizontal gap between columns in the overview, as a fraction of the view width.
+    pub column_gap: f64,
     pub workspace_shadow: WorkspaceShadow,
 }
 
@@ -130,6 +133,8 @@ impl Default for Overview {
         Self {
             zoom: 0.5,
             backdrop_color: DEFAULT_BACKDROP_COLOR,
+            empty_workspace_background: DEFAULT_EMPTY_WORKSPACE_BACKGROUND,
+            column_gap: 0.005,
             workspace_shadow: WorkspaceShadow::default(),
         }
     }
@@ -142,13 +147,17 @@ pub struct OverviewPart {
     #[knuffel(child)]
     pub backdrop_color: Option<Color>,
     #[knuffel(child)]
+    pub empty_workspace_background: Option<Color>,
+    #[knuffel(child, unwrap(argument))]
+    pub column_gap: Option<FloatOrInt<0, 1>>,
+    #[knuffel(child)]
     pub workspace_shadow: Option<WorkspaceShadowPart>,
 }
 
 impl MergeWith<OverviewPart> for Overview {
     fn merge_with(&mut self, part: &OverviewPart) {
-        merge!((self, part), zoom, workspace_shadow);
-        merge_clone!((self, part), backdrop_color);
+        merge!((self, part), zoom, column_gap, workspace_shadow);
+        merge_clone!((self, part), backdrop_color, empty_workspace_background);
     }
 }
 

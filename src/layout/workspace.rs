@@ -95,6 +95,9 @@ pub struct Workspace<W: LayoutElement> {
     /// This workspace's background.
     background_buffer: SolidColorBuffer,
 
+    /// Background fill for empty workspaces in the overview.
+    empty_overview_background_buffer: SolidColorBuffer,
+
     /// Clock for driving animations.
     pub(super) clock: Clock,
 
@@ -265,6 +268,10 @@ impl<W: LayoutElement> Workspace<W> {
             working_area,
             shadow: Shadow::new(shadow_config),
             background_buffer: SolidColorBuffer::new(view_size, options.layout.background_color),
+            empty_overview_background_buffer: SolidColorBuffer::new(
+                view_size,
+                options.overview.empty_workspace_background,
+            ),
             output: Some(output),
             clock,
             base_options,
@@ -330,6 +337,10 @@ impl<W: LayoutElement> Workspace<W> {
             working_area,
             shadow: Shadow::new(shadow_config),
             background_buffer: SolidColorBuffer::new(view_size, options.layout.background_color),
+            empty_overview_background_buffer: SolidColorBuffer::new(
+                view_size,
+                options.overview.empty_workspace_background,
+            ),
             clock,
             base_options,
             options,
@@ -426,6 +437,10 @@ impl<W: LayoutElement> Workspace<W> {
 
         self.background_buffer
             .set_color(options.layout.background_color);
+        self.empty_overview_background_buffer.update(
+            self.view_size,
+            options.overview.empty_workspace_background,
+        );
 
         self.base_options = base_options;
         self.options = options;
@@ -940,14 +955,28 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn focus_column_right_or_first(&mut self) {
-        if !self.focus_right() {
-            self.focus_column_first();
+        if self.floating_is_active.get() {
+            if !self.floating.focus_right() {
+                self.floating.focus_leftmost();
+            }
+            return;
+        }
+
+        if !self.scrolling.focus_right() {
+            self.scrolling.wrap_activate_first();
         }
     }
 
     pub fn focus_column_left_or_last(&mut self) {
-        if !self.focus_left() {
-            self.focus_column_last();
+        if self.floating_is_active.get() {
+            if !self.floating.focus_left() {
+                self.floating.focus_rightmost();
+            }
+            return;
+        }
+
+        if !self.scrolling.focus_left() {
+            self.scrolling.wrap_activate_last();
         }
     }
 
@@ -1683,6 +1712,19 @@ impl<W: LayoutElement> Workspace<W> {
         )
     }
 
+    pub fn render_overview_empty_background(&self) -> Option<SolidColorRenderElement> {
+        if self.has_windows() {
+            return None;
+        }
+
+        Some(SolidColorRenderElement::from_buffer(
+            &self.empty_overview_background_buffer,
+            Point::new(0., 0.),
+            1.,
+            Kind::Unspecified,
+        ))
+    }
+
     pub fn render_above_top_layer(&self) -> bool {
         self.scrolling.render_above_top_layer()
     }
@@ -1991,6 +2033,10 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn scrolling_mut(&mut self) -> &mut ScrollingSpace<W> {
         &mut self.scrolling
+    }
+
+    pub(super) fn set_overview_render_zoom(&self, zoom: f64) {
+        self.scrolling.set_overview_render_zoom(zoom);
     }
 
     pub fn floating(&self) -> &FloatingSpace<W> {

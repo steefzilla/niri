@@ -10,6 +10,8 @@ use crate::FloatOrInt;
 
 pub const DEFAULT_BACKGROUND_COLOR: Color = Color::from_array_unpremul([0.25, 0.25, 0.25, 1.]);
 pub const DEFAULT_BACKDROP_COLOR: Color = Color::from_array_unpremul([0.15, 0.15, 0.15, 1.]);
+pub const DEFAULT_EMPTY_WORKSPACE_BACKGROUND: Color =
+    Color::from_array_unpremul([1., 1., 1., 0x20 as f32 / 255.]);
 
 /// RGB color in [0, 1] with unpremultiplied alpha.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]

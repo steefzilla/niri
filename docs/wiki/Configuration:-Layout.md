@@ -10,6 +10,8 @@ layout {
     center-focused-column "never"
     always-center-single-column
     empty-workspace-above-first
+    wrap-columns
+    wrap-workspaces "off"
     default-column-display "tabbed"
     background-color "#003300"
 
@@ -142,6 +144,22 @@ layout {
 }
 ```
 
+### `wrap-columns`
+
+<sup>Since: next release</sup>
+
+If set, `focus-column-left` and `focus-column-right` wrap at the ends of the scrolling layout.
+Scrolling past the last column focuses the first, and scrolling past the first focuses the last.
+The view keeps moving in the same direction, as if that column sat just past the end of the strip.
+If columns are narrower than the screen, wrapping only brings in the next column; for example half-width columns AB → BC → CA.
+Horizontal panning in the overview wraps the same way.
+
+```kdl
+layout {
+    wrap-columns
+}
+```
+
 ### `empty-workspace-above-first`
 
 <sup>Since: 25.01</sup>
@@ -151,6 +169,24 @@ If set, niri will always add an empty workspace at the very start, in addition t
 ```kdl
 layout {
     empty-workspace-above-first
+}
+```
+
+### `wrap-workspaces`
+
+<sup>Since: next release</sup>
+
+Controls whether `focus-workspace-up` and `focus-workspace-down` wrap at the ends of the workspace strip.
+
+- `"off"`: stop at the first and last workspace (default).
+- `"occupied"`: wrap across workspaces that have windows, including the empty workspace niri keeps at the bottom. Wrapping from that empty workspace goes to the first workspace that has windows (skipping `empty-workspace-above-first` if it is set). The animation continues in the scroll direction, as if that workspace sat just past the end of the strip.
+- `"all"`: wrap across every workspace, including empty ones.
+
+Vertical panning in the overview wraps the same way.
+
+```kdl
+layout {
+    wrap-workspaces "occupied"
 }
 ```
 
