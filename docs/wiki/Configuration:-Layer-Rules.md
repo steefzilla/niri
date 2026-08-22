@@ -78,7 +78,7 @@ You can find the namespaces of all open layer-shell surfaces by running `niri ms
 #### `at-startup`
 
 Can be `true` or `false`.
-Matches during the first 60 seconds after starting niri.
+Matches during the first 15 seconds after starting niri.
 
 ```kdl
 // Show layer-shell surfaces with 0.5 opacity at niri startup, but not afterwards.

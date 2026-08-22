@@ -326,7 +326,7 @@ window-rule {
 <sup>Since: 0.1.6</sup>
 
 Can be `true` or `false`.
-Matches during the first 60 seconds after starting niri.
+Matches during the first 15 seconds after starting niri.
 
 This is useful for properties like `open-on-output` which you may want to apply only right after starting niri.
 
