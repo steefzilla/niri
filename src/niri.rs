@@ -331,6 +331,9 @@ pub struct Niri {
     pub bind_cooldown_timers: HashMap<Key, RegistrationToken>,
     pub bind_repeat_timer: Option<RegistrationToken>,
     pub keyboard_focus: KeyboardFocus,
+    /// When set, clicking empty space or a panel should leave windows unfocused
+    /// (keyboard focus Layout with no surface) until a window is focused again.
+    pub suppress_layout_keyboard_focus: bool,
     pub layer_shell_on_demand_focus: Option<LayerSurface>,
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub is_fdo_idle_inhibited: Arc<AtomicBool>,
@@ -980,6 +983,7 @@ impl State {
     pub fn focus_window(&mut self, window: &Window) {
         let active_output = self.niri.layout.active_output().cloned();
 
+        self.niri.suppress_layout_keyboard_focus = false;
         self.niri.layout.activate_window(window);
 
         let new_active = self.niri.layout.active_output().cloned();
@@ -1180,6 +1184,9 @@ impl State {
             };
 
             let layout_focus = || {
+                if self.niri.suppress_layout_keyboard_focus {
+                    return None;
+                }
                 self.niri
                     .layout
                     .focus()
@@ -2596,6 +2603,7 @@ impl Niri {
 
             seat,
             keyboard_focus: KeyboardFocus::Layout { surface: None },
+            suppress_layout_keyboard_focus: false,
             layer_shell_on_demand_focus: None,
             idle_inhibiting_surfaces: HashSet::new(),
             is_fdo_idle_inhibited: Arc::new(AtomicBool::new(false)),
