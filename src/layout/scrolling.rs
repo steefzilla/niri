@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cmp::{max, min};
 use std::iter::{self, zip};
 use std::rc::Rc;
@@ -100,6 +101,9 @@ pub struct ScrollingSpace<W: LayoutElement> {
 
     /// Configurable properties of the layout.
     options: Rc<Options>,
+
+    /// Overview zoom for the current render/input pass. 1 outside the overview.
+    overview_render_zoom: Cell<f64>,
 }
 
 niri_render_elements! {
@@ -345,7 +349,46 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             scale,
             clock,
             options,
+            overview_render_zoom: Cell::new(1.),
         }
+    }
+
+    pub(super) fn set_overview_render_zoom(&self, zoom: f64) {
+        self.overview_render_zoom.set(zoom);
+    }
+
+    fn overview_column_spacing(&self) -> f64 {
+        let gap = self.options.overview.column_gap;
+        if gap <= 0. {
+            return 0.;
+        }
+
+        let zoom = self.overview_render_zoom.get();
+        if zoom >= 1. {
+            return 0.;
+        }
+
+        // gap is a fraction of the output width; divide by zoom so it stays that wide on screen.
+        self.view_size.w * gap / zoom
+    }
+
+    /// How far past the workspace box columns remain visible, in workspace coordinates.
+    ///
+    /// In the overview the workspace is zoomed and centered, and horizontal cropping is
+    /// disabled, so windows can be seen overflowing the workspace. Wrap copies must stay
+    /// visible in that overflow or the strip looks empty until they enter the box.
+    fn overview_horizontal_overflow(&self) -> f64 {
+        let zoom = self.overview_render_zoom.get();
+        if zoom >= 1. {
+            return 0.;
+        }
+
+        self.view_size.w * (1. - zoom) / (2. * zoom)
+    }
+
+    fn column_intersects_visible_x(&self, screen_x: f64, width: f64) -> bool {
+        let extra = self.overview_horizontal_overflow();
+        screen_x < self.view_size.w + extra && screen_x + width > -extra
     }
 
     pub fn update_config(
@@ -447,6 +490,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             .take(self.columns.len())
             .collect();
         let shifts: Vec<f64> = self.column_wrap_shifts().collect();
+        let extra = self.overview_horizontal_overflow();
 
         for (col_idx, col) in self.columns.iter_mut().enumerate() {
             // Skip columns belonging to a different render layer.
@@ -464,7 +508,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 }
                 let x = xs[col_idx] + shift;
                 let screen_x = x - view_pos.x;
-                if screen_x < view_size.w && screen_x + width > 0. {
+                if screen_x < view_size.w + extra && screen_x + width > -extra {
                     col_x = x;
                     break;
                 }
@@ -2497,6 +2541,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     // borrowing. Note that this method's return value does not borrow the entire &Self!
     fn column_xs(&self, data: impl Iterator<Item = ColumnData>) -> impl Iterator<Item = f64> {
         let gaps = self.options.layout.gaps;
+        let overview_spacing = self.overview_column_spacing();
         let mut x = 0.;
 
         // Chain with a dummy value to be able to get one past all columns' X.
@@ -2505,7 +2550,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         data.map(move |data| {
             let rv = x;
-            x += data.width + gaps;
+            x += data.width + gaps + overview_spacing;
             rv
         })
     }
@@ -2533,27 +2578,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.columns.iter()
     }
 
-    fn columns_in_render_order_mut(&mut self) -> impl Iterator<Item = (&mut Column<W>, f64)> + '_ {
-        let offsets = self.column_xs_in_render_order(self.data.iter().copied());
-
-        let (first, active, rest) = if self.columns.is_empty() {
-            (&mut [][..], &mut [][..], &mut [][..])
-        } else {
-            let (first, rest) = self.columns.split_at_mut(self.active_column_idx);
-            let (active, rest) = rest.split_at_mut(1);
-            (first, active, rest)
-        };
-
-        let columns = active.iter_mut().chain(first).chain(rest);
-        zip(columns, offsets)
-    }
-
     pub fn columns_with_render_positions(
         &self,
     ) -> impl Iterator<Item = (&Column<W>, Point<f64, Logical>)> {
         let view_off = Point::from((-self.view_pos(), 0.));
         let view_pos = self.view_pos();
-        let view_w = self.view_size.w;
         let shifts: Vec<f64> = self.column_wrap_shifts().collect();
         let xs: Vec<f64> = self
             .column_xs(self.data.iter().copied())
@@ -2567,10 +2596,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             for &shift in &shifts {
                 let x = xs[idx] + shift;
                 // During wrap, skip the real (off-screen) placement so hit-testing and
-                // cursor warp use the visible copy.
+                // cursor warp use the visible copy. In overview this range is wider than
+                // the workspace box so wrap copies fill the overflow instead of blinking in.
                 if shift != 0. || self.wrap_period_adjust.is_some() {
                     let screen_x = x - view_pos;
-                    if screen_x >= view_w || screen_x + width <= 0. {
+                    if !self.column_intersects_visible_x(screen_x, width) {
                         continue;
                     }
                 }
@@ -2586,14 +2616,41 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn columns_with_render_positions_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&mut Column<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&mut Column<W>, Point<f64, Logical>)> + '_ {
         let view_off = Point::from((-self.view_pos(), 0.));
-        self.columns_in_render_order_mut().map(move |(col, col_x)| {
-            let col_off = Point::from((col_x, 0.));
-            let col_render_off = col.render_offset();
-            let pos = view_off + col_off + col_render_off;
-            (col, pos)
-        })
+        let active_idx = self.active_column_idx;
+        let col_count = self.columns.len();
+
+        let offsets: Vec<f64> = self
+            .column_xs_in_render_order(self.data.iter().copied())
+            .collect();
+        let indices: Vec<usize> = if col_count == 0 {
+            vec![]
+        } else {
+            let mut order = vec![active_idx];
+            order.extend((0..active_idx).chain(active_idx + 1..col_count));
+            order
+        };
+
+        let (first, active, rest) = if self.columns.is_empty() {
+            (&mut [][..], &mut [][..], &mut [][..])
+        } else {
+            let (first, rest) = self.columns.split_at_mut(self.active_column_idx);
+            let (active, rest) = rest.split_at_mut(1);
+            (first, active, rest)
+        };
+
+        active
+            .iter_mut()
+            .chain(first)
+            .chain(rest)
+            .zip(offsets.into_iter().zip(indices))
+            .map(move |(col, (col_x, _idx))| {
+                let col_off = Point::from((col_x, 0.));
+                let col_render_off = col.render_offset();
+                let pos = view_off + col_off + col_render_off;
+                (col, pos)
+            })
     }
 
     pub fn tiles_with_render_positions(
@@ -3299,7 +3356,31 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         Some(true)
     }
 
+    fn view_offset_scroll_bounds(&self) -> (f64, f64) {
+        if self.columns.is_empty() {
+            return (0., 0.);
+        }
+
+        let last_col_idx = self.columns.len() - 1;
+        let last_col_x = self.column_x(last_col_idx);
+        let last_col_width = self.data[last_col_idx].width;
+        let mut rightmost = last_col_x + last_col_width - self.working_area.loc.x;
+
+        let active_col_x = self.column_x(self.active_column_idx);
+        let mut leftmost = -self.working_area.size.w - active_col_x;
+
+        if self.options.layout.wrap_columns && self.columns.len() > 1 {
+            let period = self.column_period();
+            leftmost -= period;
+            rightmost += period;
+        }
+
+        (leftmost, rightmost)
+    }
+
     pub fn dnd_scroll_gesture_scroll(&mut self, delta: f64) -> bool {
+        let scroll_bounds = self.view_offset_scroll_bounds();
+
         let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
             return false;
         };
@@ -3338,38 +3419,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let view_offset = gesture.tracker.pos() + gesture.delta_from_tracker;
 
         // Clamp it so that it doesn't go too much out of bounds.
-        let (leftmost, rightmost) = if self.columns.is_empty() {
-            (0., 0.)
-        } else {
-            let gaps = self.options.layout.gaps;
-
-            let mut leftmost = -self.working_area.size.w;
-
-            let last_col_idx = self.columns.len() - 1;
-            let last_col_x = self
-                .columns
-                .iter()
-                .take(last_col_idx)
-                .fold(0., |col_x, col| col_x + col.width() + gaps);
-            let last_col_width = self.data[last_col_idx].width;
-            let mut rightmost = last_col_x + last_col_width - self.working_area.loc.x;
-
-            let active_col_x = self
-                .columns
-                .iter()
-                .take(self.active_column_idx)
-                .fold(0., |col_x, col| col_x + col.width() + gaps);
-            leftmost -= active_col_x;
-            rightmost -= active_col_x;
-
-            if self.options.layout.wrap_columns && self.columns.len() > 1 {
-                let period = last_col_x + last_col_width + gaps;
-                leftmost -= period;
-                rightmost += period;
-            }
-
-            (leftmost, rightmost)
-        };
+        let (leftmost, rightmost) = scroll_bounds;
         let min_offset = f64::min(leftmost, rightmost);
         let max_offset = f64::max(leftmost, rightmost);
         let clamped_offset = view_offset.clamp(min_offset, max_offset);
@@ -3561,11 +3611,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             )
             .0;
             let last_col_idx = self.columns.len() - 1;
-            let last_col_x = self
-                .columns
-                .iter()
-                .take(last_col_idx)
-                .fold(0., |col_x, col| col_x + col.width() + gaps);
+            let last_col_x = self.column_x(last_col_idx);
             let rightmost_snap = snap_points(
                 last_col_x,
                 &self.columns[last_col_idx],
@@ -3606,8 +3652,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 }
             };
 
-            let mut col_x = 0.;
             for (col_idx, col) in self.columns.iter().enumerate() {
+                let col_x = self.column_x(col_idx);
                 let (left, right) = snap_points(
                     col_x,
                     col,
@@ -3617,8 +3663,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     self.columns.get(col_idx + 1).map(|c| c.width()),
                 );
                 push(col_idx, left, right, 0.);
-
-                col_x += col.width() + gaps;
             }
 
             // Allow snapping onto wrap copies past the first/last column, so overview
@@ -3641,8 +3685,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 };
 
                 for shift in [-period, period] {
-                    let mut col_x = shift;
                     for (col_idx, col) in self.columns.iter().enumerate() {
+                        let col_x = self.column_x(col_idx) + shift;
                         let (left, right) =
                             snap_points(col_x, col, prev_w(col_idx), next_w(col_idx));
                         for view_pos in [left, right - view_width] {
@@ -3659,7 +3703,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                                 });
                             }
                         }
-                        col_x += col.width() + gaps;
                     }
                 }
             }
