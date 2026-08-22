@@ -238,13 +238,24 @@ impl WorkspaceSwitch {
 }
 
 impl WorkspaceSwitchGesture {
-    fn min_max(&self, workspace_count: usize) -> (f64, f64) {
+    fn min_max(&self, workspace_count: usize, wrap: bool) -> (f64, f64) {
+        let last = workspace_count.saturating_sub(1);
         if self.is_clamped {
-            let min = self.center_idx.saturating_sub(1) as f64;
-            let max = (self.center_idx + 1).min(workspace_count - 1) as f64;
+            let min = if wrap && self.center_idx == 0 {
+                -1.
+            } else {
+                self.center_idx.saturating_sub(1) as f64
+            };
+            let max = if wrap && self.center_idx >= last {
+                workspace_count as f64
+            } else {
+                (self.center_idx + 1).min(last) as f64
+            };
             (min, max)
+        } else if wrap {
+            (-1., workspace_count as f64)
         } else {
-            (0., (workspace_count - 1) as f64)
+            (0., last as f64)
         }
     }
 
@@ -554,6 +565,10 @@ impl<W: LayoutElement> Monitor<W> {
                 .unwrap_or(0),
             WrapWorkspaces::All | WrapWorkspaces::Off => 0,
         }
+    }
+
+    fn workspace_switch_wraps(&self) -> bool {
+        self.options.layout.wrap_workspaces != WrapWorkspaces::Off && self.workspaces.len() > 1
     }
 
     pub(super) fn resolve_add_window_target<'a>(
@@ -1201,6 +1216,8 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     pub fn update_render_elements(&mut self, is_active: bool) {
+        self.set_workspaces_overview_render_zoom(self.overview_zoom());
+
         let mut insert_hint_ws_geo = None;
         let insert_hint_ws_id = self
             .insert_hint
@@ -1496,9 +1513,16 @@ impl<W: LayoutElement> Monitor<W> {
         compute_overview_zoom(&self.options, progress)
     }
 
+    fn set_workspaces_overview_render_zoom(&self, zoom: f64) {
+        for ws in &self.workspaces {
+            ws.set_overview_render_zoom(zoom);
+        }
+    }
+
     pub(super) fn set_overview_progress(&mut self, progress: Option<&super::OverviewProgress>) {
         let prev_render_idx = self.workspace_render_idx();
         self.overview_progress = progress.map(OverviewProgress::from);
+        self.set_workspaces_overview_render_zoom(self.overview_zoom());
         let new_render_idx = self.workspace_render_idx();
 
         // If the view jumped (can happen when going from corrected to uncorrected render_idx, for
@@ -1776,6 +1800,8 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     pub fn window_under(&self, pos_within_output: Point<f64, Logical>) -> Option<(&W, HitType)> {
+        self.set_workspaces_overview_render_zoom(self.overview_zoom());
+
         let (ws, geo) = self.workspace_under(pos_within_output)?;
 
         if self.overview_progress.is_some() {
@@ -1897,6 +1923,7 @@ impl<W: LayoutElement> Monitor<W> {
         let height = (self.view_size.h * scale).ceil() as i32;
 
         let zoom = self.overview_zoom();
+        self.set_workspaces_overview_render_zoom(zoom);
 
         let insert_hint_render_loc = self
             .insert_hint_render_loc
@@ -2141,7 +2168,9 @@ impl<W: LayoutElement> Monitor<W> {
 
         let pos = gesture.tracker.pos() / total_height;
 
-        let (min, max) = gesture.min_max(self.workspaces.len());
+        let wrap = self.options.layout.wrap_workspaces != WrapWorkspaces::Off
+            && self.workspaces.len() > 1;
+        let (min, max) = gesture.min_max(self.workspaces.len(), wrap);
         let new_idx = gesture.start_idx + pos;
         let new_idx = rubber_band.clamp(min, max, new_idx);
 
@@ -2228,7 +2257,9 @@ impl<W: LayoutElement> Monitor<W> {
         let pos = gesture.tracker.pos() / total_height;
         let unclamped = gesture.start_idx + pos;
 
-        let (min, max) = gesture.min_max(self.workspaces.len());
+        let wrap = self.options.layout.wrap_workspaces != WrapWorkspaces::Off
+            && self.workspaces.len() > 1;
+        let (min, max) = gesture.min_max(self.workspaces.len(), wrap);
         let clamped = unclamped.clamp(min, max);
 
         // Make sure that DnD scrolling too much outside the min/max does not "build up".
@@ -2256,6 +2287,13 @@ impl<W: LayoutElement> Monitor<W> {
             self.workspace_size_with_gap(1.).h
         };
 
+        let wrap = self.workspace_switch_wraps();
+        let n = self.workspaces.len();
+        let wrap_end = self.wrap_end_idx();
+        let wrap_start = self.wrap_start_idx();
+        let clock = self.clock.clone();
+        let config = self.options.animations.workspace_switch.0;
+
         let Some(WorkspaceSwitch::Gesture(gesture)) = &mut self.workspace_switch else {
             return false;
         };
@@ -2271,13 +2309,21 @@ impl<W: LayoutElement> Monitor<W> {
         let current_pos = gesture.tracker.pos() / total_height;
         let pos = gesture.tracker.projected_end_pos() / total_height;
 
-        let (min, max) = gesture.min_max(self.workspaces.len());
-        let new_idx = gesture.start_idx + pos;
-
-        let new_idx = new_idx.clamp(min, max);
-        let new_idx = new_idx.round() as usize;
+        let (min, max) = gesture.min_max(n, wrap);
+        let new_idx = (gesture.start_idx + pos).clamp(min, max);
+        let rounded = new_idx.round();
 
         velocity *= rubber_band.clamp_derivative(min, max, gesture.start_idx + current_pos);
+
+        let current_idx = gesture.current_idx;
+        let (new_idx, visual_to) = if wrap && rounded < 0. {
+            (wrap_end, -1.)
+        } else if wrap && rounded >= n as f64 {
+            (wrap_start, n as f64)
+        } else {
+            let idx = rounded.clamp(0., (n.saturating_sub(1)) as f64) as usize;
+            (idx, idx as f64)
+        };
 
         if self.active_workspace_idx != new_idx {
             self.previous_workspace_id = Some(self.workspaces[self.active_workspace_idx].id());
@@ -2285,11 +2331,11 @@ impl<W: LayoutElement> Monitor<W> {
 
         self.active_workspace_idx = new_idx;
         self.workspace_switch = Some(WorkspaceSwitch::Animation(Animation::new(
-            self.clock.clone(),
-            gesture.current_idx,
-            new_idx as f64,
+            clock,
+            current_idx,
+            visual_to,
             velocity,
-            self.options.animations.workspace_switch.0,
+            config,
         )));
 
         true

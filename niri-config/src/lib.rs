@@ -1707,6 +1707,8 @@ mod tests {
                     b: 0.15,
                     a: 1.0,
                 },
+                empty_workspace_background: Overview::default().empty_workspace_background,
+                column_gap: 0.005,
                 workspace_shadow: WorkspaceShadow {
                     off: false,
                     offset: ShadowOffset {
